@@ -23,7 +23,7 @@ public:
     };
     tr_field& operator=(const tr_field& ap){
         if(this == &ap) return *this;
-        if(NULL != data) delete[] data;
+        if(NULL != data) delete[] data; // 先清理掉旧数据的空间
         len = ap.len;
         pt = ap.len;
         data = new _byte[len]{0};
@@ -258,6 +258,22 @@ public:
             head = p;
         }
     }
+    progress& operator=(const progress& sp){
+        if(this == &sp) return *this;
+        end = sp.end;
+        tr_block* p = sp.head, *q;
+        while(head){
+            q = head->nex;
+            delete head;
+            head = q;
+        }
+        head = new tr_block(p->beg, p->end);
+        for(q = head, p = p->nex;NULL != p;){
+            q->nex = new tr_block(p->beg, p->end);
+            p = p->nex;
+            q = q->nex;
+        }
+    }
     /**
      * 取第一个完整块进度
      * -1表示未知
@@ -290,8 +306,13 @@ public:
      * 参数三表示第b个空块
      */
     bool block(int& beg, int& end, int b = 0){
+        if(head->beg && b == 0){
+            beg = 0;
+            end = head->beg;
+            return true;
+        }
         tr_block* p = head;
-        int i = 0;
+        int i = !!head->beg;
         for(; NULL != p;p = p ->nex, i++){
             if(i == b){
                 if(NULL == p->nex && !this->end) return false;
@@ -366,17 +387,19 @@ public:
         return false;
     }
 };
-class datapacket{                                   // 将多个数据包组合起来
-    const static int max_datagram_len = 65507;      // 每个数据包最大容量
-    const static int max_buf_size = 1024;           // 用内存作缓冲区时,最大容量
-    _byte* buf;                                     // 缓冲区
+class datapacket{                                       // 将多个数据包组合起来
+    const static int max_datagram_len = 65507;          // 每个数据包最大容量
+    const static int max_buf_size = 1024 * 1024 * 4;    // 用内存作缓冲区时,最大容量
+    _byte* buf;                                         // 缓冲区
+    progress bufprog;
     int dlen, flen, svd, svp;
-    _byte data[max_datagram_len];                   // 单个包
+    _byte tempdata[max_datagram_len];                   // 单个包
 public:
     datapacket() = delete;
     datapacket(int bufsize){
         buf = new _byte[bufsize]{0};
     };
-    datapacket(const char* fn);
-    void getb(void* dest, int& len);                // 取缓冲区第一个有连续数据的部分
+    datapacket(const char* fn);                         // 用文件来存
+    void getb(void* dest, int& len);                    // 取缓冲区第一个有连续数据的部分
+    void putb(void* dsrc, int& len);
 };
