@@ -42,7 +42,7 @@ public:
     /**
      * 给定字段名和包长(数据长,非总长)
      */ 
-    tr_field(const char* desc, int size){                         // 申请空间没有放数据进去
+    tr_field(const char* desc, int size = 0){                         // 申请空间没有放数据进去
         len += 4;
         uint16_t desc_len = strlen(desc) + 1;
         len += desc_len;
@@ -109,13 +109,11 @@ public:
             memcpy(&dlen, data + 2, 2);
             dlen += pt + size - len;    // `pt + size` 是新长度
             len = pt + size;
-            _byte* temp = new _byte[pt];
+            _byte* temp = new _byte[len]{0};
             memcpy(temp, data, pt);
             delete[] data;
-            data = new _byte[len];
-            memcpy(data, temp, pt);
+            data = temp;
             memcpy(data + 2, &dlen, 2);
-            delete[] temp;
         }
         memcpy(data + pt, dptr, size);  // 现在空间足够, 直接在后面写入
         pt += size;
@@ -196,7 +194,14 @@ public:
     int length(bool f = false){
         return f ? len : pt;
     }
-    
+    /**
+     * 返回这个包最大的容量
+     */
+    uint16_t maxsize(){
+        uint16_t desc_len;
+        memcpy(&desc_len, data, 2);
+        return 65503 - desc_len;
+    }
     ~tr_field(){
         if(NULL != data){
             delete[] data;
@@ -205,8 +210,173 @@ public:
     }
 };
 
-class datapacket{
-    const static int max_datagram_len = 65507;
-    int len;
-    _byte data[max_datagram_len];
+/**
+ * 块信息
+ */
+struct tr_block{
+    tr_block* nex = NULL;
+    int beg;
+    int end;
+    tr_block(int beg, int end){
+        this->beg = beg;
+        this->end = end;
+    }
+};
+/**
+ * 进度信息
+ */
+class progress{
+    int end;
+    tr_block* head;
+public:
+    /**
+     * 参数指定进度终止长度
+     */
+    progress(int end){
+        this->end = end > 0 ? end : 0;
+        head = new tr_block(0,0);
+    };
+    progress(){
+        end = 0;
+        head = new tr_block(0,0);
+    }
+    progress(const progress& cp){
+        end = cp.end;
+        tr_block* p = cp.head, *q;
+        head = new tr_block(p->beg, p->end);
+        for(q = head, p = p->nex;NULL != p;){
+            q->nex = new tr_block(p->beg, p->end);
+            p = p->nex;
+            q = q->nex;
+        }
+    }
+    ~progress(){
+        tr_block* p;
+        while(head){
+            p = head->nex;
+            delete head;
+            head = p;
+        }
+    }
+    /**
+     * 取第一个完整块进度
+     * -1表示未知
+     */
+    int prog(){
+        if(!end) return -1;
+        return (head->end - head->beg) * 100 / end;
+    }
+    /**
+     * 取总进度
+     */
+    int proga(){
+        if(!end) return -1;
+        return size() * 100 / end;
+    }
+    /**
+     * 取总大小
+     */
+    int size(){
+        int cnt = 0;
+        tr_block* p = head;
+        while(NULL != p){
+            cnt += p->end - p->beg;
+            p = p->nex;
+        }
+        return cnt;
+    }
+    /**
+     * 取空的块
+     * 参数三表示第b个空块
+     */
+    bool block(int& beg, int& end, int b = 0){
+        tr_block* p = head;
+        int i = 0;
+        for(; NULL != p;p = p ->nex, i++){
+            if(i == b){
+                if(NULL == p->nex && !this->end) return false;
+                beg = p->end;
+                end = NULL == p->nex ? this->end : p->nex->beg;
+                return true;
+            }
+        }
+        return false;
+    }
+    /**
+     * 取块的个数
+     * 空块个数 = 块数 - 1
+     */
+    int count(){
+        tr_block* p= head;
+        int i = 0;
+        for(; NULL != p; i++, p = p->nex);
+        return i;
+    };
+    /**
+     * 填充从beg到end的进度
+     */
+    bool put(int beg, int end){
+        if(beg >= end) return false;                    // end比beg小
+        if(this->end && end > this->end) return false;  // 有上限且end超上限
+        if(head->beg == 0 && head->end == 0){
+            head->beg = beg;
+            head->end = end;
+            return true;
+        }
+        if(head->beg == end){
+            head->beg = beg;
+            return true;
+        }
+        if(head->beg > end){
+            tr_block* p = new tr_block(beg, end);
+            p->nex = head;
+            head = p;
+            return true;
+        }
+        tr_block* p = head;
+        while(NULL != p){
+            if(NULL == p->nex){
+                if(p->end > beg) return false;
+                else if(p->end == beg) p->end = end;
+                else p->nex = new tr_block(beg, end);
+                return true;
+            }
+            if(beg >= p->nex->end) {
+                p = p->nex;
+                continue;
+            }
+            if(p->end > beg || p->nex->beg < end) return false;
+            if(p->end == beg && p->nex->beg == end){
+                tr_block* t = p->nex;
+                p->nex = t->nex;
+                p->end = t->end;
+                delete t;
+            }
+            else if(p->end < beg && p->nex->beg > end){
+                tr_block* t = new tr_block(beg, end);
+                t->nex = p->nex;
+                p->nex = t;
+            }
+            else if(p->end == beg)
+                p->end = end;
+            else if(p->nex->beg == end)
+                p->nex->beg = beg;
+            return true;
+        }
+        return false;
+    }
+};
+class datapacket{                                   // 将多个数据包组合起来
+    const static int max_datagram_len = 65507;      // 每个数据包最大容量
+    const static int max_buf_size = 1024;           // 用内存作缓冲区时,最大容量
+    _byte* buf;                                     // 缓冲区
+    int dlen, flen, svd, svp;
+    _byte data[max_datagram_len];                   // 单个包
+public:
+    datapacket() = delete;
+    datapacket(int bufsize){
+        buf = new _byte[bufsize]{0};
+    };
+    datapacket(const char* fn);
+    void getb(void* dest, int& len);                // 取缓冲区第一个有连续数据的部分
 };
