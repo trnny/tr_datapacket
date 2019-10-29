@@ -28,7 +28,7 @@ public:
         pt = ap.len;
         data = new _byte[len]{0};
         memcpy(data, ap.data, pt);
-    }
+    };
     /**
      * 从对象内存复制构造
      * 可以用于把字段packet后的对象再转成field
@@ -38,7 +38,7 @@ public:
         this->pt = pt;
         data = new _byte[pt];
         memcpy(data, _field, pt);
-    }
+    };
     /**
      * 给定字段名和包长(数据长,非总长)
      */ 
@@ -56,7 +56,7 @@ public:
         }else {
             len = 0;
         }
-    }
+    };
     /**
      * 如果数据是字符串,用这种构造方式更好
      * 参数一为描述 参数二为数据字符串
@@ -97,7 +97,7 @@ public:
         }else{
             len = 0;
         }
-    }
+    };
     /**
      * 往包里塞数据, 自动扩容(如果没超)
      * 参数一源地址 参数二长度
@@ -118,12 +118,25 @@ public:
         memcpy(data + pt, dptr, size);  // 现在空间足够, 直接在后面写入
         pt += size;
         return true;
-    }
+    };
+    /**
+     * 将数据按照字符串读出
+     * 参数一保存描述 参数二保存读到的字符串
+     * 可以用该函数取得描述名
+    */
+    void get(char* desc, char* dest){
+        desc && strcpy(desc, (const char*)data + 4);
+        if(!dest) return;
+        uint16_t desc_len;
+        memcpy(&desc_len, data, 2);
+        strcpy(dest, (const char*)data + 4 + desc_len);
+    };
     /**
      * 将有数据的部分读出, 即忽略包尾空数据(如果有)
      * 参数一保存描述 参数二保存读到的数据 参数三保存读到的长度
      * 注意参数二的容量, 容量不足会引发潜在错误
      * 需要读取部分范围数据, 使用getd
+     * 可以用该函数取内容长度
     */
     void get(char* desc, void *dest, int& len){
         desc && strcpy(desc, (const char*)data + 4);
@@ -132,43 +145,31 @@ public:
         uint16_t dlen;                                  // 数据总长度
         memcpy(&dlen, data + 2, 2);
         len = dlen + pt - this->len;
-        memcpy(dest, data + 4 + desc_len, len);
+        dest && memcpy(dest, data + 4 + desc_len, len);
     };
     /**
-     * 将数据按照字符串读出
-     * 参数一保存描述 参数二保存读到的字符串
+     * 将数据全部读出 包括包尾可能存在的空数据
+     * 参数一保存读到的数据 参数二保存数据的总长度
+     * 由于是全部读出,所以接收数据的参数二容量得够
     */
-    void get(char* desc, char* dest){
-        desc && strcpy(desc, (const char*)data + 4);
+    void geta(void *dest, int& len){
         uint16_t desc_len;
         memcpy(&desc_len, data, 2);
-        strcpy(dest, (const char*)data + 4 + desc_len);
-    }
+        uint16_t dlen;
+        memcpy(&dlen, data + 2, 2);
+        len = dlen;
+        memcpy(dest, data + 4 + desc_len, len);
+    };
     /**
      * 按照偏移读
      * 从start开始读len长读到dest中
      */
-    void getd(char* desc, void* dest, int len, int start = 0){
-        desc && strcpy(desc, (const char*)data + 4);
+    void getd(void* dest, int len, int start = 0){
         uint16_t desc_len;
         memcpy(&desc_len, data, 2);
         uint16_t dlen;
         memcpy(&dlen, data + 2, 2);
         memcpy(dest, data + 4 + desc_len + start, start + len > dlen ? dlen - start : len);
-    }
-    /**
-     * 将数据全部读出 包括包尾可能存在的空数据
-     * 参数一保存描述 参数二保存读到的数据 参数三保存数据的总长度
-     * 由于是全部读出,所以接收数据的参数二容量得够
-    */
-    void geta(char* desc, void *dest, int& len){
-        desc && strcpy(desc, (const char*)data + 4);
-        uint16_t desc_len;
-        memcpy(&desc_len, data, 2);
-        uint16_t dlen;
-        memcpy(&dlen, data + 2, 2);
-        len = dlen;                                 // 保险起见, 读到uint16_t里面,万一读到int里面是错的
-        memcpy(dest, data + 4 + desc_len, len);
     };
     /**
      * 将包里面所有数据取出
@@ -186,14 +187,14 @@ public:
             memcpy(dest + 2, &dlen, 2);
         }
         return true;
-    }
+    };
     /**
      * 返回包大小, 
      * true则返回总长度 false表示已用长度
      */
     int length(bool f = false){
         return f ? len : pt;
-    }
+    };
     /**
      * 返回这个包最大的容量
      */
@@ -201,13 +202,13 @@ public:
         uint16_t desc_len;
         memcpy(&desc_len, data, 2);
         return 65503 - desc_len;
-    }
+    };
     ~tr_field(){
         if(NULL != data){
             delete[] data;
             data = NULL;
         }
-    }
+    };
 };
 
 /**
@@ -389,17 +390,71 @@ public:
 };
 class datapacket{                                       // 将多个数据包组合起来
     const static int max_datagram_len = 65507;          // 每个数据包最大容量
-    const static int max_buf_size = 1024 * 1024 * 4;    // 用内存作缓冲区时,最大容量
+    const static int max_buf_size = 1024 * 1024 * 4;    // 用内存作缓冲区时,默认最大容量
     _byte* buf;                                         // 缓冲区
     progress bufprog;
-    int dlen, flen, svd, svp;
-    _byte tempdata[max_datagram_len];                   // 单个包
-public:
-    datapacket() = delete;
-    datapacket(int bufsize){
-        buf = new _byte[bufsize]{0};
+    int dlen, flen;
+    _byte* tempdata;                                    // 单个包
+    bool d_write(void* dsrc,int beg, int len){
+        return NULL != buf && memcpy(buf + beg, dsrc, len) /* || ... */;
     };
-    datapacket(const char* fn);                         // 用文件来存
-    void getb(void* dest, int& len);                    // 取缓冲区第一个有连续数据的部分
-    void putb(void* dsrc, int& len);
+    bool d_read(void* dest,int beg, int len){
+        return NULL != buf && memcpy(dest, buf + beg, len);
+    };
+public:
+    ~datapacket(){
+        if(NULL != buf) delete[] buf;
+    };
+    datapacket() = delete;
+    datapacket(const datapacket&) = delete;
+    /**
+     * 给定缓冲区大小
+     * 内存缓冲
+     */
+    datapacket(int bufsize){
+        buf = new _byte[bufsize > 0 ? bufsize : max_buf_size]{0};
+        bufprog = progress(bufsize);
+    };
+    datapacket(const char* fn, int fsize){
+        buf = NULL;
+        bufprog = progress(fsize);
+        // ...
+    };
+    /**
+     * 取缓冲区第一个有连续数据的部分
+     */
+    void getb(void* dest, int& len){
+        int beg, end;
+        if(!bufprog.block(beg, end)){
+            beg = 0;
+            end = bufprog.size();
+        };
+        len = end - beg;
+        d_read(dest, beg, len);
+    };
+    /**
+     * 将数据写入缓冲区第一个空块
+     * dsrc数据源 返回写入长度
+     * 如果总进度一开始就未给出 这个不保险
+     */
+    int putb(void* dsrc){
+        int beg, end;
+        if(bufprog.block(beg, end) && bufprog.put(beg, end) && d_write(dsrc, beg, end - beg))
+            return beg - end;
+        return 0;
+    };
+    /**
+     * 将数据写入第一个空块开始的地方,指定写入长度
+     */
+    void putb(void* dsrc, int len){
+        int beg, end;
+        if(!bufprog.block(beg, end)) beg = bufprog.size();
+        bufprog.put(beg, beg + len) && d_write(dsrc, beg, len);
+    }
+    /**
+     * 将数据写入指定位置
+     */
+    void putb(void* dsrc, int beg, int end){
+        bufprog.put(beg, end) && d_write(dsrc, beg, end - beg);
+    };
 };
