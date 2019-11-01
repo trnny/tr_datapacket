@@ -2,12 +2,17 @@
 
 #include<iostream>
 #include<string>
-#include<string.h>
+#include<cstring>
+#include<fstream>
+#include<cstdio>
 
 using namespace std;
 
 typedef unsigned char _byte;
 
+/**
+ * 用于把多个字节组合在一起
+ */
 class tr_field{
     unsigned int len = 0;       // 总长度
     unsigned int pt = 0;        // 有数据的尾部
@@ -276,7 +281,7 @@ public:
         }
     }
     /**
-     * 取第一个完整块进度
+     * 取第一个完整块百分百进度
      * -1表示未知
      */
     int prog(){
@@ -284,7 +289,7 @@ public:
         return (head->end - head->beg) * 100 / end;
     }
     /**
-     * 取总进度
+     * 取总百分百进度
      */
     int proga(){
         if(!end) return -1;
@@ -303,26 +308,44 @@ public:
         return cnt;
     }
     /**
-     * 取空的块
-     * 参数三表示第b个空块
+     * 取第b个空块的起始
+     * 返回false 要么没有第b块 要么是最后一块尾未知
+     * 所以如果返回了true, beg和end里的数据是有效的
      */
-    bool block(int& beg, int& end, int b = 0){
-        if(head->beg && b == 0){
+    bool empty_block(int& beg, int& end, int b = 0){
+        if(head->beg && b == 0){                // 开头有空块
             beg = 0;
             end = head->beg;
             return true;
         }
+        if(b == 0 && !head->end && this->end){ // 一整块都是空
+            beg = 0;
+            end = this->end;
+            return true;
+        }
         tr_block* p = head;
-        int i = !!head->beg;
+        int i = !!head->beg;                    // 不为0表示前面有个空块
         for(; NULL != p;p = p ->nex, i++){
             if(i == b){
-                if(NULL == p->nex && !this->end) return false;
+                if(NULL == p->nex && !this->end) return false;  // 最后一块终点未知
                 beg = p->end;
                 end = NULL == p->nex ? this->end : p->nex->beg;
                 return true;
             }
         }
         return false;
+    }
+    /**
+     * 获取第b个块的起始
+     * 返回false表示没有第b块
+     */
+    bool block(int& beg, int& end, int b = 0){
+        tr_block *p = head;
+        for(int i = 0;i < b && p;i++,p = p->nex);
+        if(!p) return false;
+        beg = p->beg;
+        end = p->end;
+        return true;
     }
     /**
      * 取块的个数
@@ -338,7 +361,7 @@ public:
      * 填充从beg到end的进度
      */
     bool put(int beg, int end){
-        if(beg >= end) return false;                    // end比beg小
+        if(beg >= end || beg < 0) return false;         // beg,end不合规
         if(this->end && end > this->end) return false;  // 有上限且end超上限
         if(head->beg == 0 && head->end == 0){
             head->beg = beg;
@@ -388,73 +411,74 @@ public:
         return false;
     }
 };
-class datapacket{                                       // 将多个数据包组合起来
-    const static int max_datagram_len = 65507;          // 每个数据包最大容量
-    const static int max_buf_size = 1024 * 1024 * 4;    // 用内存作缓冲区时,默认最大容量
-    _byte* buf;                                         // 缓冲区
+
+class tr_buffer{
+    const static bool Mbuf = true;
+    const static bool Fbuf = false;
+    const static int max_buf_size = 4 * 1024 * 1024;
+    typedef bool BufType;
+    _byte* mbuf = NULL;         // 指针没有设定默认值不能访问
+    FILE* fbuf = NULL;
     progress bufprog;
-    int dlen, flen;
-    _byte* tempdata;                                    // 单个包
-    bool d_write(void* dsrc,int beg, int len){
-        return NULL != buf && memcpy(buf + beg, dsrc, len) /* || ... */;
+    int bufsize;
+    BufType buftype;
+    bool buf_write(const void* dsrc,int beg, int len){
+        return (buftype && mbuf && memcpy(mbuf + beg, dsrc, len)) || (!buftype && fbuf && !fseek(fbuf, beg, 0) && fwrite(dsrc, len, 1, fbuf));
     };
-    bool d_read(void* dest,int beg, int len){
-        return NULL != buf && memcpy(dest, buf + beg, len);
+    bool buf_read(void* dest,int beg, int len){
+        return (buftype && mbuf && memcpy(dest, mbuf + beg, len)) || (!buftype && fbuf && !fseek(fbuf, beg, 0) && fread(dest, len, 1, fbuf));
     };
 public:
-    ~datapacket(){
-        if(NULL != buf) delete[] buf;
+    ~tr_buffer(){
+        if(buftype && mbuf)
+            delete[] mbuf;
+        else if(!buftype && fbuf){
+            fclose(fbuf);
+        }
     };
-    datapacket() = delete;
-    datapacket(const datapacket&) = delete;
-    /**
-     * 给定缓冲区大小
-     * 内存缓冲
-     */
-    datapacket(int bufsize){
-        buf = new _byte[bufsize > 0 ? bufsize : max_buf_size]{0};
+    tr_buffer() = delete;
+    tr_buffer(const tr_buffer&) = delete;
+    tr_buffer(int bufsize){
+        buftype = Mbuf;
+        bufsize = bufsize > 0 && bufsize < max_buf_size ? bufsize : max_buf_size;
+        this->bufsize = bufsize;
+        mbuf = new _byte[bufsize]{0};
         bufprog = progress(bufsize);
-    };
-    datapacket(const char* fn, int fsize){
-        buf = NULL;
-        bufprog = progress(fsize);
-        // ...
-    };
-    /**
-     * 取缓冲区第一个有连续数据的部分
-     */
-    void getb(void* dest, int& len){
-        int beg, end;
-        if(!bufprog.block(beg, end)){
-            beg = 0;
-            end = bufprog.size();
-        };
-        len = end - beg;
-        d_read(dest, beg, len);
-    };
-    /**
-     * 将数据写入缓冲区第一个空块
-     * dsrc数据源 返回写入长度
-     * 如果总进度一开始就未给出 这个不保险
-     */
-    int putb(void* dsrc){
-        int beg, end;
-        if(bufprog.block(beg, end) && bufprog.put(beg, end) && d_write(dsrc, beg, end - beg))
-            return beg - end;
-        return 0;
-    };
-    /**
-     * 将数据写入第一个空块开始的地方,指定写入长度
-     */
-    void putb(void* dsrc, int len){
-        int beg, end;
-        if(!bufprog.block(beg, end)) beg = bufprog.size();
-        bufprog.put(beg, beg + len) && d_write(dsrc, beg, len);
+    }
+    tr_buffer(const char* fbufname, int bufsize){
+        buftype = Fbuf;
+        this->bufsize = bufsize;
+        fbuf = fopen(fbufname, "wb+");
+        if(!fbuf) fbuf = tmpfile();     // 失败则创建临时文件
+        bufprog = progress(bufsize);
     }
     /**
-     * 将数据写入指定位置
+     * 从缓冲区指定位置读
+     * end 超出不负责
      */
-    void putb(void* dsrc, int beg, int end){
-        bufprog.put(beg, end) && d_write(dsrc, beg, end - beg);
+    bool get_buf(void* dest, int beg,int end){
+        return dest && beg >= 0 && end > beg && buf_read(dest, beg, end - beg);
+    };
+    /**
+     * 取空块
+     * 在往缓冲区写的时候用的到
+     */
+    bool get_empty_block(int& beg, int& end, int b = 0){
+        return bufprog.empty_block(beg, end, b);
+    }
+    /**
+     * 读指定有数据块的数据和起始位置信息
+     */
+    bool get_block(void* dest, int& beg, int& end, int b = 0){
+        if(!bufprog.block(beg, end, b)) return false;
+        if(!dest) return true;
+        return buf_read(dest, beg, end - beg);
+    };
+    /**
+     * 往指定位置写入数据
+     * 超出范围会返回false
+     */
+    bool put(const void* dsrc, int beg, int len){
+        return bufprog.put(beg, beg + len) && buf_write(dsrc, beg, len);
     };
 };
