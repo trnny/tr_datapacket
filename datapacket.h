@@ -256,6 +256,26 @@ public:
             q = q->nex;
         }
     }
+    /**
+     * 从保存了进度信息的地址读进度信息
+     */
+    progress(const void* dsrc){
+        int cnt, beg, end;
+        memcpy(&this->end, dsrc, 4);
+        memcpy(&cnt, dsrc + 4, 4);
+        memcpy(&beg, dsrc + 8, 4);
+        memcpy(&end, dsrc + 12, 4);
+        head = new tr_block(beg, end);
+        tr_block* p = head;
+        cnt *= 8;
+        for(int i = 8;i < cnt;){
+            i += 8;
+            memcpy(&beg, dsrc + i, 4);
+            memcpy(&end, dsrc + i + 4, 4);
+            p->nex = new tr_block(beg, end);
+            p = p->nex;
+        }
+    }
     ~progress(){
         tr_block* p;
         while(head){
@@ -410,6 +430,17 @@ public:
         }
         return false;
     }
+    /**
+     * 将进度信息保存在指定位置
+     * len保存节点数
+     */
+    void save(void* dest, int& len){    // end/count/blocks...
+        memcpy(dest, &end, 4);
+        tr_block* p= head;
+        for(len = 0;p;len+=8, memcpy(dest + len, &(p->beg), 4), memcpy(dest + len + 4, &(p->end), 4), p = p->nex);
+        len /= 8;
+        memcpy(dest + 4, &len, 4);
+    }
 };
 
 class tr_buffer{
@@ -422,8 +453,14 @@ class tr_buffer{
     progress bufprog;
     int bufsize;
     BufType buftype;
+    /**
+     * 从src将数据写入缓冲区
+     * 内存或文件,
+     * 如果是文件,会自动将bufsize改动
+     * bufsize改动只有在一开始指定为0的情况有用
+     */
     bool buf_write(const void* dsrc,int beg, int len){
-        return (buftype && mbuf && memcpy(mbuf + beg, dsrc, len)) || (!buftype && fbuf && !fseek(fbuf, beg, 0) && fwrite(dsrc, len, 1, fbuf));
+        return (buftype && mbuf && memcpy(mbuf + beg, dsrc, len)) || (!buftype && fbuf && !fseek(fbuf, beg, 0) && fwrite(dsrc, len, 1, fbuf) && ((bufsize < beg + len && (bufsize = beg + len)) || true));
     };
     bool buf_read(void* dest,int beg, int len){
         return (buftype && mbuf && memcpy(dest, mbuf + beg, len)) || (!buftype && fbuf && !fseek(fbuf, beg, 0) && fread(dest, len, 1, fbuf));
@@ -445,11 +482,15 @@ public:
         mbuf = new _byte[bufsize]{0};
         bufprog = progress(bufsize);
     }
+    /**
+     * 构造一个文件缓冲区
+     * 不指定文件名会创建一个临时文件
+     */
     tr_buffer(const char* fbufname, int bufsize){
         buftype = Fbuf;
         this->bufsize = bufsize;
         fbuf = fopen(fbufname, "wb+");
-        if(!fbuf) fbuf = tmpfile();     // 失败则创建临时文件
+        if(!fbuf) fbuf = tmpfile();
         bufprog = progress(bufsize);
     }
     /**
