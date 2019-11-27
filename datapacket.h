@@ -14,8 +14,8 @@ typedef unsigned char _byte;
  * 用于把多个字节组合在一起
  */
 class tr_field{
-    unsigned int len = 0;       // 总长度
-    unsigned int pt = 0;        // 有数据的尾部
+    uint16_t len = 0;       // 总长度
+    uint16_t pt = 0;        // 有数据的尾部
     _byte* data = NULL;         // [0-1] 描述长度 [2-3] 数据(总)长度
 
 public:
@@ -39,7 +39,7 @@ public:
      * 可以用于把字段packet后的对象再转成field
      * pt为data的长度
      */ 
-    tr_field(void* _field, unsigned int pt){
+    tr_field(void* _field, uint16_t pt){
         len = pt;
         this->pt = pt;
         data = new _byte[pt];
@@ -53,7 +53,7 @@ public:
         pt = 4;
         uint16_t desc_len = strlen(desc) + 1;
         pt += desc_len;
-        if(size + pt > 65507)size = 65507 - pt;
+        if((int)size + pt > 65507)size = 65507 - pt;
         len = pt + size;
         data = new _byte[len]{0};
         memcpy(data, &desc_len, 2);                         // 描述长
@@ -106,9 +106,9 @@ public:
      * 往包里塞数据, 自动扩容(如果没超)
      * 参数一源地址 参数二长度
      */
-    bool push(const void* dptr, unsigned int size){
+    bool push(const void* dptr, uint16_t size){
         if(!data || pt + size > 65507) return false;
-        if(pt + size > len) {           // 重新申请空间并复制 如果不需要扩长 dlen没变
+        if((int)pt + size > len) {           // 重新申请空间并复制 如果不需要扩长 dlen没变
             uint16_t dlen;
             memcpy(&dlen, data + 2, 2); // 原数据部分总长度
             dlen += pt + size - len;    // `pt + size` 是新长度  `pt + size -len`是增长长度
@@ -142,7 +142,7 @@ public:
      * 需要读取部分范围数据, 使用getd
      * 可以用该函数取内容长度
     */
-    void get(char* desc, void *dest, unsigned int& len){
+    void get(char* desc, void *dest, int& len){
         desc && strcpy(desc, (const char*)data + 4);
         uint16_t desc_len;
         memcpy(&desc_len, data, 2);                     // 取不到?
@@ -156,7 +156,7 @@ public:
      * 参数一保存读到的数据 参数二保存数据的总长度
      * 由于是全部读出,所以接收数据的参数二容量得够
     */
-    void geta(void *dest, unsigned int& len){
+    void geta(void *dest, int& len){
         uint16_t desc_len;
         memcpy(&desc_len, data, 2);
         uint16_t dlen;
@@ -168,7 +168,7 @@ public:
      * 按照偏移读
      * 从start开始读len长读到dest中
      */
-    void getd(void* dest, unsigned int len, unsigned int start = 0){
+    void getd(void* dest, uint16_t len, uint16_t start = 0){
         uint16_t desc_len;
         memcpy(&desc_len, data, 2);
         uint16_t dlen;
@@ -180,7 +180,7 @@ public:
      * 参数一用来放包的数据 参数二用来放包长度
      * 这里不会将包尾空数据(如果有)取出
      */
-    bool packet(void* dest, unsigned int& size){
+    bool packet(void* dest, int& size){
         if(len == 0 || !data) return false;                  // 包是空的(肯定是前面哪出错)
         size = pt;
         memcpy(dest, data, pt);
