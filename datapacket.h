@@ -37,8 +37,9 @@ public:
     /**
      * 从对象内存复制构造
      * 可以用于把字段packet后的对象再转成field
+     * pt为data的长度
      */ 
-    tr_field(void* _field, int pt){
+    tr_field(void* _field, unsigned int pt){
         len = pt;
         this->pt = pt;
         data = new _byte[pt];
@@ -46,25 +47,23 @@ public:
     };
     /**
      * 给定字段名和包长(数据长,非总长)
+     * 包的总长度最大为65507
      */ 
-    tr_field(const char* desc, int size = 0){                         // 申请空间没有放数据进去
-        len += 4;
+    tr_field(const char* desc, uint16_t size = 0){                         // 申请空间没有放数据进去
+        pt = 4;
         uint16_t desc_len = strlen(desc) + 1;
-        len += desc_len;
-        len += size;
-        if(len <= 65507){
-            pt = len - size;                                    // 留下了大小为`size`的空间
-            data = new _byte[len]{0};
-            memcpy(data, &desc_len, 2);                         // 描述长
-            memcpy(data + 2, &size, 2);                         // 数据长
-            memcpy(data + 4, desc, desc_len);                   // 描述
-        }else {
-            len = 0;
-        }
+        pt += desc_len;
+        if(size + pt > 65507)size = 65507 - pt;
+        len = pt + size;
+        data = new _byte[len]{0};
+        memcpy(data, &desc_len, 2);                         // 描述长
+        memcpy(data + 2, &size, 2);                         // 数据长
+        memcpy(data + 4, desc, desc_len);                   // 描述
     };
     /**
      * 如果数据是字符串,用这种构造方式更好
      * 参数一为描述 参数二为数据字符串
+     * 注意报长度不能超,超过会有潜在错误
      */
     tr_field(const char* desc, const char* strdata){
         len += 4;
@@ -87,7 +86,7 @@ public:
      * 这个构造是复制一个指针所指向的内存空间
      * 参数一描述 参数二源地址 参数三要复制的长度
      */
-    tr_field(const char* desc, void* dptr, int size){
+    tr_field(const char* desc, void* dptr, uint16_t size){
         len += 4;
         uint16_t desc_len = strlen(desc) + 1;
         len += desc_len;
@@ -107,12 +106,12 @@ public:
      * 往包里塞数据, 自动扩容(如果没超)
      * 参数一源地址 参数二长度
      */
-    bool push(const void* dptr, int size){
-        if(pt + size > 65507) return false;
+    bool push(const void* dptr, unsigned int size){
+        if(!data || pt + size > 65507) return false;
         if(pt + size > len) {           // 重新申请空间并复制 如果不需要扩长 dlen没变
             uint16_t dlen;
-            memcpy(&dlen, data + 2, 2);
-            dlen += pt + size - len;    // `pt + size` 是新长度
+            memcpy(&dlen, data + 2, 2); // 原数据部分总长度
+            dlen += pt + size - len;    // `pt + size` 是新长度  `pt + size -len`是增长长度
             len = pt + size;
             _byte* temp = new _byte[len]{0};
             memcpy(temp, data, pt);
@@ -143,7 +142,7 @@ public:
      * 需要读取部分范围数据, 使用getd
      * 可以用该函数取内容长度
     */
-    void get(char* desc, void *dest, int& len){
+    void get(char* desc, void *dest, unsigned int& len){
         desc && strcpy(desc, (const char*)data + 4);
         uint16_t desc_len;
         memcpy(&desc_len, data, 2);                     // 取不到?
@@ -157,7 +156,7 @@ public:
      * 参数一保存读到的数据 参数二保存数据的总长度
      * 由于是全部读出,所以接收数据的参数二容量得够
     */
-    void geta(void *dest, int& len){
+    void geta(void *dest, unsigned int& len){
         uint16_t desc_len;
         memcpy(&desc_len, data, 2);
         uint16_t dlen;
@@ -169,7 +168,7 @@ public:
      * 按照偏移读
      * 从start开始读len长读到dest中
      */
-    void getd(void* dest, int len, int start = 0){
+    void getd(void* dest, unsigned int len, unsigned int start = 0){
         uint16_t desc_len;
         memcpy(&desc_len, data, 2);
         uint16_t dlen;
@@ -181,8 +180,8 @@ public:
      * 参数一用来放包的数据 参数二用来放包长度
      * 这里不会将包尾空数据(如果有)取出
      */
-    bool packet(void* dest, int& size){
-        if(len == 0) return false;                  // 包是空的(肯定是前面哪出错)
+    bool packet(void* dest, unsigned int& size){
+        if(len == 0 || !data) return false;                  // 包是空的(肯定是前面哪出错)
         size = pt;
         memcpy(dest, data, pt);
         if(pt != len){                              // 压缩一点,去除后面没用数据
@@ -197,7 +196,7 @@ public:
      * 返回包大小, 
      * true则返回总长度 false表示已用长度
      */
-    int length(bool f = false){
+    unsigned int length(bool f = false){
         return f ? len : pt;
     };
     /**
@@ -221,9 +220,9 @@ public:
  */
 struct tr_block{
     tr_block* nex = NULL;
-    int beg;
-    int end;
-    tr_block(int beg, int end){
+    unsigned int beg;
+    unsigned int end;
+    tr_block(unsigned int beg, unsigned int end){
         this->beg = beg;
         this->end = end;
     }
@@ -232,7 +231,7 @@ struct tr_block{
  * 进度信息
  */
 class progress{
-    int end;
+    unsigned int end;
     tr_block* head;
 public:
     /**
@@ -318,7 +317,7 @@ public:
     /**
      * 取总大小
      */
-    int size(){
+    unsigned int size(){
         int cnt = 0;
         tr_block* p = head;
         while(NULL != p){
@@ -332,7 +331,7 @@ public:
      * 返回false 要么没有第b块 要么是最后一块尾未知
      * 所以如果返回了true, beg和end里的数据是有效的
      */
-    bool empty_block(int& beg, int& end, int b = 0){
+    bool empty_block(unsigned int& beg, unsigned int& end, int b = 0){
         if(head->beg && b == 0){                // 开头有空块
             beg = 0;
             end = head->beg;
@@ -359,7 +358,7 @@ public:
      * 获取第b个块的起始
      * 返回false表示没有第b块
      */
-    bool block(int& beg, int& end, int b = 0){
+    bool block(unsigned int& beg, unsigned int& end, int b = 0){
         tr_block *p = head;
         for(int i = 0;i < b && p;i++,p = p->nex);
         if(!p) return false;
@@ -380,7 +379,7 @@ public:
     /**
      * 填充从beg到end的进度
      */
-    bool put(int beg, int end){
+    bool put(unsigned int beg, unsigned int end){
         if(beg >= end || beg < 0) return false;         // beg,end不合规
         if(this->end && end > this->end) return false;  // 有上限且end超上限
         if(head->beg == 0 && head->end == 0){
@@ -446,12 +445,12 @@ public:
 class tr_buffer{
     const static bool Mbuf = true;
     const static bool Fbuf = false;
-    const static int max_buf_size = 4 * 1024 * 1024;
+    const static unsigned int max_buf_size = 4 * 1024 * 1024;
     typedef bool BufType;
     _byte* mbuf = NULL;         // 指针没有设定默认值不能访问
     FILE* fbuf = NULL;
     progress bufprog;
-    int bufsize;
+    unsigned int bufsize;
     BufType buftype;
     /**
      * 从src将数据写入缓冲区
@@ -459,10 +458,10 @@ class tr_buffer{
      * 如果是文件,会自动将bufsize改动
      * bufsize改动只有在一开始指定为0的情况有用
      */
-    bool buf_write(const void* dsrc,int beg, int len){
+    bool buf_write(const void* dsrc, unsigned int beg, unsigned int len){
         return (buftype && mbuf && memcpy(mbuf + beg, dsrc, len)) || (!buftype && fbuf && !fseek(fbuf, beg, 0) && fwrite(dsrc, len, 1, fbuf) && ((bufsize < beg + len && (bufsize = beg + len)) || true));
     };
-    bool buf_read(void* dest,int beg, int len){
+    bool buf_read(void* dest, unsigned int beg, unsigned int len){
         return (buftype && mbuf && memcpy(dest, mbuf + beg, len)) || (!buftype && fbuf && !fseek(fbuf, beg, 0) && fread(dest, len, 1, fbuf));
     };
 public:
@@ -475,9 +474,9 @@ public:
     };
     tr_buffer() = delete;
     tr_buffer(const tr_buffer&) = delete;
-    tr_buffer(int bufsize){
+    tr_buffer(unsigned int bufsize){
         buftype = Mbuf;
-        bufsize = bufsize > 0 && bufsize < max_buf_size ? bufsize : max_buf_size;
+        bufsize = (bufsize != 0 && bufsize < max_buf_size ? bufsize : max_buf_size);
         this->bufsize = bufsize;
         mbuf = new _byte[bufsize]{0};
         bufprog = progress(bufsize);
@@ -486,7 +485,7 @@ public:
      * 构造一个文件缓冲区
      * 不指定文件名会创建一个临时文件
      */
-    tr_buffer(const char* fbufname, int bufsize){
+    tr_buffer(const char* fbufname, unsigned int bufsize){
         buftype = Fbuf;
         this->bufsize = bufsize;
         fbuf = fopen(fbufname, "wb+");
@@ -497,20 +496,20 @@ public:
      * 从缓冲区指定位置读
      * end 超出不负责
      */
-    bool get_buf(void* dest, int beg,int end){
+    bool get_buf(void* dest, unsigned int beg, unsigned int end){
         return dest && beg >= 0 && end > beg && buf_read(dest, beg, end - beg);
     };
     /**
      * 取空块
      * 在往缓冲区写的时候用的到
      */
-    bool get_empty_block(int& beg, int& end, int b = 0){
+    bool get_empty_block(unsigned int& beg, unsigned int& end, int b = 0){
         return bufprog.empty_block(beg, end, b);
     }
     /**
      * 读指定有数据块的数据和起始位置信息
      */
-    bool get_block(void* dest, int& beg, int& end, int b = 0){
+    bool get_block(void* dest, unsigned int& beg, unsigned int& end, int b = 0){
         if(!bufprog.block(beg, end, b)) return false;
         if(!dest) return true;
         return buf_read(dest, beg, end - beg);
@@ -519,7 +518,7 @@ public:
      * 往指定位置写入数据
      * 超出范围会返回false
      */
-    bool put(const void* dsrc, int beg, int len){
+    bool put(const void* dsrc, unsigned int beg, unsigned int len){
         return bufprog.put(beg, beg + len) && buf_write(dsrc, beg, len);
     };
 };

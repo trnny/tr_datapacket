@@ -7,7 +7,7 @@ int main(){
     buff.put("567", 10, 3);
     buff.put(&a, 300, 4);
     a = 0;
-    int b, e;
+    unsigned int b, e;
     buff.get_block(&a, b, e, 2);
     cout << a << ' ' << b << ' ' << e << endl;
     tr_buffer buff2("./tmp.buf", 0);    // 0表示总大小未知
